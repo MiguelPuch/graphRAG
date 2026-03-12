@@ -7,9 +7,6 @@
 # PDF files
 *.pdf
 
-# Markdown files
-*.md
-
 # Python
 __pycache__/
 *.py[cod]
