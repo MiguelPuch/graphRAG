@@ -1,0 +1,29 @@
+# Environment variables
+.env
+
+# JSON data files
+*.json
+
+# PDF files
+*.pdf
+
+# Markdown files
+*.md
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+*.egg
+.venv/
+venv/
+dist/
+build/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db

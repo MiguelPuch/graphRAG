@@ -1,0 +1,35 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "copernion-trace-rag"
+version = "0.2.0"
+description = "Hybrid RAG service: technical Milvus + legal Neo4j GraphRAG + LLM routing."
+requires-python = ">=3.11"
+dependencies = [
+  "fastapi==0.124.4",
+  "uvicorn[standard]==0.38.0",
+  "python-multipart==0.0.20",
+  "pydantic>=2.0.0,<3.0.0",
+  "python-dotenv==1.2.1",
+  "docling==2.64.1",
+  "sentence-transformers==3.3.1",
+  "transformers==4.50.3",
+  "torch==2.5.1",
+  "pymilvus==2.4.9",
+  "neo4j==5.28.1",
+  "marshmallow>=3.13.0,<4.0.0",
+  "environs>=9.5.0",
+  "openai==2.11.0",
+  "numpy==2.2.1",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["*"]
+
+[project.optional-dependencies]
+dev = [
+  "pytest==8.4.2",
+]
