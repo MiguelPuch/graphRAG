@@ -97,6 +97,12 @@ def _repair_visible_text(text: str) -> str:
 def _normalize_for_search(text: str) -> str:
     """Accent-insensitive, punctuation-light normalizer for lexical matching."""
     value = _repair_visible_text(text or "").lower()
+    # Repair frequent mojibake splits before stripping punctuation.
+    value = re.sub(r"\bart[\W_]*culos\b", "articulos", value)
+    value = re.sub(r"\bjur[\W_]*dicas\b", "juridicas", value)
+    value = re.sub(r"\bjur[\W_]*dico\b", "juridico", value)
+    value = re.sub(r"\br[\W_]*gimen\b", "regimen", value)
+    value = re.sub(r"\binformaci[\W_]*n\b", "informacion", value)
     value = value.replace("¿", " ").replace("¡", " ")
     value = "".join(ch for ch in unicodedata.normalize("NFKD", value) if not unicodedata.combining(ch))
     value = re.sub(r"[^a-z0-9/%\s_\-]+", " ", value)
