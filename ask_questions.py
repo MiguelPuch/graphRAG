@@ -72,34 +72,10 @@ def load_questions(path: Path, repair_mojibake: bool = True) -> list[str]:
     if not lines:
         return []
 
-    questions: list[str] = []
-    pending = ""
-    for raw_line in lines:
-        line = _normalize_question_line(raw_line, repair_mojibake=False)
-        if not line:
-            continue
-        line = line.replace("Â¿Â¿", "¿").strip()
-        segments = re.findall(r"[^?]+\?", line)
-        if not segments:
-            segments = [line]
-
-        for seg in segments:
-            pending = f"{pending} {seg}".strip() if pending else seg
-            while "?" in pending:
-                head, tail = pending.split("?", 1)
-                question = _normalize_question_line(f"{head.strip()}?", repair_mojibake=False)
-                if question:
-                    questions.append(question)
-                pending = tail.strip()
-
-    if pending:
-        trailing = _normalize_question_line(pending, repair_mojibake=False)
-        if trailing:
-            questions.append(trailing)
-
     cleaned: list[str] = []
-    for q in questions:
+    for q in lines:
         qq = _normalize_question_line(q, repair_mojibake=repair_mojibake)
+        qq = qq.replace("Â¿Â¿", "¿").strip()
         qq = re.sub(r"\s+", " ", qq).strip()
         if len(qq) < 6:
             continue
