@@ -2427,7 +2427,7 @@ class GraphRAGEngine:
                     + f"Intencion estimada: {intent}\n\n"
                     + "Formato:\n"
                     + "- Respuesta directa en 1-4 frases.\n"
-                    + "- Si piden articulos, lista solo los articulos relevantes del contexto.\n"
+                    + "- Si piden articulos, NO des solo una lista: explica brevemente que regula cada bloque normativo aplicable (1-2 frases) y cierra con 'Revisar articulos: articulo X, articulo Y'.\n"
                     + "- Si la cobertura es parcial, indicalo explicitamente.\n"
                     + "- No repitas el contexto completo.\n"
                     + "- Cada frase juridica debe incluir al menos una cita [n].\n"
@@ -2686,7 +2686,7 @@ class GraphRAGEngine:
                             or ""
                         ),
                     )
-                article_items: list[tuple[str, str]] = []
+                article_items: list[tuple[str, str, int, GraphChunk]] = []
                 for chunk in core_ranked:
                     chunk_id = str(chunk.id or "")
                     idx = int(index_by_id.get(chunk_id) or 1)
@@ -2701,17 +2701,29 @@ class GraphRAGEngine:
                     if number in seen_articles:
                         continue
                     item = f"articulo {number} [{idx}]"
-                    if item in (it for _, it in article_items):
+                    if item in (it for _, it, _, _ in article_items):
                         continue
-                    article_items.append((number, item))
+                    article_items.append((number, item, idx, chunk))
                     seen_articles.add(number)
                     if len(article_items) >= article_list_cap:
                         break
                 if article_items:
                     article_items = sorted(article_items, key=lambda pair: _article_number_sort(pair[0]))
-                items = [item for _, item in article_items]
-                if items:
-                    return "Los articulos relevantes son: " + ", ".join(items) + "."
+                if article_items:
+                    refs = [item for _, item, _, _ in article_items]
+                    detail_points: list[str] = []
+                    for number, _, idx, chunk in article_items[:2]:
+                        sent = first_sentence(chunk.text or "")
+                        sent = re.sub(r"^\s*articulo\s+\d+[^:\.]*[:\.]\s*", "", sent, flags=re.IGNORECASE).strip(" .;")
+                        if sent:
+                            detail_points.append(f"El articulo {number} regula {sent.lower()} [{idx}].")
+                    if detail_points:
+                        intro = " ".join(detail_points)
+                    elif len(article_items) == 1:
+                        intro = "El articulo seleccionado aporta la base normativa principal para responder a la consulta."
+                    else:
+                        intro = "Los articulos seleccionados se complementan y fijan el marco normativo aplicable a la consulta."
+                    return intro + " Revisar articulos: " + ", ".join(refs) + "."
 
         if signals.get("asks_minimum_core_requirements"):
             core_pattern = r"\b(requisitos?|acceso|autorizacion|funciones?\s+minimas?|objeto|concepto|actividad\s+principal)\b"
@@ -3822,6 +3834,120 @@ class GraphRAGEngine:
 
         return answer
 
+    def _rewrite_legacy_article_list_answer(self, question: str, answer: str, chunks: list[GraphChunk]) -> str:
+        text = str(answer or "").strip()
+        if not text:
+            return text
+
+        match = re.match(r"^\s*los\s+articulos\s+relevantes\s+son\s*:\s*(.+)$", text, flags=re.IGNORECASE | re.DOTALL)
+        if not match:
+            return text
+
+        tail = match.group(1).strip()
+        first_line = tail.splitlines()[0].strip()
+        refs = [item.strip(" .;") for item in first_line.split(",") if item.strip()]
+        refs = _dedupe(refs)
+        if not refs:
+            return text
+
+        article_numbers: list[str] = []
+        ref_pairs: list[tuple[str, int]] = []
+        for ref in refs:
+            ref_norm = _normalize_for_search(ref)
+            m = re.search(
+                r"\barticulo\s+(\d+(?:\s*(?:bis|ter|quater|quinquies|sexies|septies|octies|nonies|decies|undecies|duodecies))?)\b",
+                ref_norm,
+            )
+            if m:
+                art = _normalize_article_number(m.group(1))
+                article_numbers.append(art)
+                m_idx = re.search(r"\[(\d+)\]", ref)
+                if m_idx:
+                    ref_pairs.append((art, int(m_idx.group(1))))
+
+        article_numbers = [num for num in _dedupe(article_numbers) if num]
+
+        def _best_sentence(raw_text: str) -> str:
+            clean = _repair_visible_text(str(raw_text or "")).strip()
+            if not clean:
+                return ""
+            lines = [ln.strip() for ln in clean.splitlines() if ln and ln.strip()]
+            for ln in lines:
+                norm = _normalize_for_search(ln)
+                if re.match(r"^articulo\s+\d+", norm):
+                    continue
+                ln = re.sub(r"^[-*]\s+", "", ln).strip(" .;")
+                if len(_normalize_for_search(ln)) >= 24:
+                    return ln[:220]
+            flat = re.sub(r"\s+", " ", clean)
+            parts = re.split(r"(?<=[\.!?])\s+", flat)
+            for part in parts:
+                norm = _normalize_for_search(part)
+                norm = re.sub(r"^articulo\s+\d+\s*[:\.-]?\s*", "", norm)
+                if len(norm) >= 24:
+                    return part.strip(" .;")[:220]
+            return ""
+
+        detail_points: list[str] = []
+        if ref_pairs and chunks:
+            for art, idx in ref_pairs[:2]:
+                if idx <= 0 or idx > len(chunks):
+                    continue
+                sentence = _best_sentence(chunks[idx - 1].text or "")
+                if sentence:
+                    detail_points.append(f"El articulo {art} concreta que {sentence.lower()} [{idx}].")
+
+        if (not detail_points) and article_numbers and chunks:
+            for art in article_numbers[:2]:
+                picked_idx = 0
+                picked_text = ""
+                for idx, chunk in enumerate(chunks, start=1):
+                    number = _normalize_article_number((chunk.metadata or {}).get("numero")) or self._article_from_text(chunk.text or "") or ""
+                    if number != art:
+                        continue
+                    sentence = _best_sentence(chunk.text or "")
+                    if sentence:
+                        picked_idx = idx
+                        picked_text = sentence
+                        break
+                if picked_text:
+                    if picked_idx > 0:
+                        detail_points.append(f"El articulo {art} desarrolla {picked_text.lower()} [{picked_idx}].")
+                    else:
+                        detail_points.append(f"El articulo {art} desarrolla {picked_text.lower()}.")
+
+        question_hint = ""
+        q_norm = _normalize_for_search(question or "")
+        if re.search(r"\b(sancion|infraccion|sancionador)\b", q_norm):
+            question_hint = "En este caso, la respuesta se centra en el marco sancionador aplicable. "
+        elif re.search(r"\b(registro|autorizacion|inscrip)\b", q_norm):
+            question_hint = "En este caso, la respuesta se centra en requisitos de registro y autorizacion. "
+        elif re.search(r"\b(comercializacion|inversores?)\b", q_norm):
+            question_hint = "En este caso, la respuesta se centra en reglas de comercializacion e informacion al inversor. "
+
+        if detail_points:
+            intro = question_hint + " ".join(detail_points)
+        elif len(article_numbers) == 1:
+            intro = (
+                question_hint
+                + f"El articulo {article_numbers[0]} contiene la base normativa principal para responder a la consulta. "
+                + "Conviene revisar su redaccion completa para confirmar alcance y excepciones."
+            )
+        elif len(article_numbers) == 2:
+            intro = (
+                question_hint
+                + f"Los articulos {article_numbers[0]} y {article_numbers[1]} se complementan para fijar la respuesta normativa aplicable. "
+                + "La lectura conjunta permite evitar interpretaciones parciales."
+            )
+        else:
+            intro = (
+                question_hint
+                + "La respuesta se fundamenta en varios articulos conectados que delimitan el marco aplicable. "
+                + "Revisarlos de forma conjunta mejora la interpretacion juridica de la consulta."
+            )
+
+        return intro.strip() + " Revisar articulos: " + ", ".join(refs) + "."
+
     def generate_from_chunks(self, question: str, chunks: list[GraphChunk], chat_history: list[dict] | None = None) -> str:
         self._last_generation_debug = {
             "not_found_reason": None,
@@ -3853,7 +3979,7 @@ class GraphRAGEngine:
         signals = self._query_signals(question)
         if signals.get("asks_article_numbers"):
             deterministic = self._extractive_answer_by_intent(question=question, chunks=chunks)
-            if deterministic and deterministic.lower().startswith("los articulos relevantes son:"):
+            if deterministic and "revisar articulos:" in deterministic.lower():
                 answer = deterministic
                 self._last_generation_debug.update(
                     {
@@ -3922,6 +4048,8 @@ class GraphRAGEngine:
                 }
             )
             return "NO ENCONTRADO EN EL DOCUMENTO"
+
+        answer = self._rewrite_legacy_article_list_answer(question=question, answer=answer, chunks=chunks)
 
         if self._last_generation_debug.get("response_mode") == "affirmative":
             answer_norm = _normalize_for_search(answer)

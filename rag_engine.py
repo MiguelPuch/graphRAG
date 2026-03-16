@@ -716,7 +716,12 @@ class LLMGenerator:
             "en el documento original.\n\n"
             "7. TRANSPARENCIA: si varios fragmentos se contradicen, señálalo "
             "explícitamente indicando qué dice cada fuente.\n\n"
-            "8. IDIOMA: responde siempre en español."
+            "8. IDIOMA: responde siempre en español.\n\n"
+            "9. RESPUESTAS SOBRE ARTÍCULOS: cuando te pidan qué artículos aplican, "
+            "NO respondas solo con una enumeración. Primero explica en 1-2 frases "
+            "qué regulan esos artículos en relación con la pregunta y después añade "
+            "una línea final indicando los artículos concretos para revisión "
+            "(por ejemplo: 'Revisar artículos: artículo X, artículo Y')."
         )
 
         # ── User message con contexto + pregunta ──
